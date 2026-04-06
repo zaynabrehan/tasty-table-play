@@ -11,14 +11,9 @@ interface FoodCardProps {
   item: DbMenuItem;
 }
 
-const UPSELL_CATEGORIES = [
-  "Appetizers",
-  "Pouch Shawarma",
-  "Shawarma Platter",
-  "Turkish Wraps",
-  "Turkish Doner",
-  "Shawarma",
-];
+const shouldUpsell = (item: DbMenuItem) =>
+  MAIN_FOOD_CATEGORIES.includes(item.category) ||
+  SAUCE_TRIGGER_NAMES.some((n) => item.name.toLowerCase().includes(n));
 
 const FoodCard = ({ item }: FoodCardProps) => {
   const { addToCart, toggleFavorite, isFavorite } = useStore();
