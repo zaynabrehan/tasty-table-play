@@ -3,7 +3,7 @@ import { useStore } from "@/context/StoreContext";
 import { Heart, Plus } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
-import BeverageUpsellModal from "@/components/BeverageUpsellModal";
+import UpsellModal, { MAIN_FOOD_CATEGORIES, SAUCE_TRIGGER_NAMES } from "@/components/UpsellModal";
 
 type DbMenuItem = Tables<"menu_items">;
 
@@ -11,20 +11,15 @@ interface FoodCardProps {
   item: DbMenuItem;
 }
 
-const UPSELL_CATEGORIES = [
-  "Appetizers",
-  "Pouch Shawarma",
-  "Shawarma Platter",
-  "Turkish Wraps",
-  "Turkish Doner",
-  "Shawarma",
-];
+const shouldUpsell = (item: DbMenuItem) =>
+  MAIN_FOOD_CATEGORIES.includes(item.category) ||
+  SAUCE_TRIGGER_NAMES.some((n) => item.name.toLowerCase().includes(n));
 
 const FoodCard = ({ item }: FoodCardProps) => {
   const { addToCart, toggleFavorite, isFavorite } = useStore();
   const fav = isFavorite(item.id);
   const imageUrl = item.image_url || "/placeholder.svg";
-  const [showBeverageModal, setShowBeverageModal] = useState(false);
+  const [showUpsell, setShowUpsell] = useState(false);
 
   const handleAdd = () => {
     addToCart({
@@ -36,8 +31,8 @@ const FoodCard = ({ item }: FoodCardProps) => {
       image: imageUrl,
     });
 
-    if (UPSELL_CATEGORIES.includes(item.category)) {
-      setShowBeverageModal(true);
+    if (shouldUpsell(item)) {
+      setShowUpsell(true);
     }
   };
 
@@ -77,10 +72,11 @@ const FoodCard = ({ item }: FoodCardProps) => {
         </div>
       </div>
 
-      <BeverageUpsellModal
-        open={showBeverageModal}
-        onClose={() => setShowBeverageModal(false)}
+      <UpsellModal
+        open={showUpsell}
+        onClose={() => setShowUpsell(false)}
         addedItemName={item.name}
+        addedItemCategory={item.category}
       />
     </>
   );
