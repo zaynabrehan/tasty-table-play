@@ -19,7 +19,7 @@ const FoodCard = ({ item }: FoodCardProps) => {
   const { addToCart, toggleFavorite, isFavorite } = useStore();
   const fav = isFavorite(item.id);
   const imageUrl = item.image_url || "/placeholder.svg";
-  const [showBeverageModal, setShowBeverageModal] = useState(false);
+  const [showUpsell, setShowUpsell] = useState(false);
 
   const handleAdd = () => {
     addToCart({
@@ -31,8 +31,8 @@ const FoodCard = ({ item }: FoodCardProps) => {
       image: imageUrl,
     });
 
-    if (UPSELL_CATEGORIES.includes(item.category)) {
-      setShowBeverageModal(true);
+    if (shouldUpsell(item)) {
+      setShowUpsell(true);
     }
   };
 
@@ -72,10 +72,11 @@ const FoodCard = ({ item }: FoodCardProps) => {
         </div>
       </div>
 
-      <BeverageUpsellModal
-        open={showBeverageModal}
-        onClose={() => setShowBeverageModal(false)}
+      <UpsellModal
+        open={showUpsell}
+        onClose={() => setShowUpsell(false)}
         addedItemName={item.name}
+        addedItemCategory={item.category}
       />
     </>
   );
