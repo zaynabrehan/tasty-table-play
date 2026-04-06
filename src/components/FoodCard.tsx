@@ -3,7 +3,7 @@ import { useStore } from "@/context/StoreContext";
 import { Heart, Plus } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
-import BeverageUpsellModal from "@/components/BeverageUpsellModal";
+import UpsellModal, { MAIN_FOOD_CATEGORIES, SAUCE_TRIGGER_NAMES } from "@/components/UpsellModal";
 
 type DbMenuItem = Tables<"menu_items">;
 
