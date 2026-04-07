@@ -2,7 +2,7 @@ import jushhLogo from "@/assets/jushh-logo.png";
 import { useAuth } from "@/hooks/useAuth";
 import { useStore } from "@/context/StoreContext";
 import { AnimatePresence, motion } from "framer-motion";
-import { Clock, Heart, LogOut, MapPin, Menu, Phone, Shield, ShoppingCart, User, X } from "lucide-react";
+import { Clock, Heart, LogOut, MapPin, Menu, Phone, ShoppingCart, User, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -121,11 +121,6 @@ const Navbar = () => {
             {/* Auth */}
             {user ? (
               <div className="flex items-center gap-2">
-                {isAdmin && (
-                  <Link to="/admin" className="p-2 text-primary hover:text-accent transition-colors" title="Admin">
-                    <Shield className="w-5 h-5" />
-                  </Link>
-                )}
                 <button onClick={() => setShowLogoutDialog(true)} className="p-2 text-muted-foreground hover:text-destructive transition-colors" title="Sign out">
                   <LogOut className="w-5 h-5" />
                 </button>
