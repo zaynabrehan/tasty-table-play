@@ -5,12 +5,12 @@ import {
   ChevronDown, ChevronRight, Clock, Image, Loader2,
   Package, Plus, RefreshCw, Trash2, Upload,
   UtensilsCrossed, X, BarChart3, MapPin, FileText,
-  Truck, Store, UserPlus, Shield,
+  Truck, Store, UserPlus, Shield, MessageSquare, Mail, Eye, EyeOff,
 } from "lucide-react";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
 
-type Tab = "dashboard" | "orders" | "menu" | "admins";
+type Tab = "dashboard" | "orders" | "menu" | "messages" | "admins";
 
 interface MenuItemRow {
   id: string;
@@ -39,6 +39,16 @@ interface OrderItemRow {
   quantity: number;
   price: number;
   menu_items: { name: string; image_url: string | null } | null;
+}
+
+interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  message: string;
+  is_read: boolean;
+  created_at: string;
 }
 
 const STATUS_FLOW = ["pending", "confirmed", "preparing", "rider_picked", "delivered"];
@@ -86,6 +96,10 @@ const Admin = () => {
   // Admin management
   const [adminEmail, setAdminEmail] = useState("");
   const [addingAdmin, setAddingAdmin] = useState(false);
+
+  // Messages
+  const [messages, setMessages] = useState<ContactMessage[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Stats
   const stats = useMemo(() => {
@@ -146,6 +160,31 @@ const Admin = () => {
     setLoading(false);
   };
 
+  const fetchMessages = async () => {
+    const { data } = await supabase
+      .from("contact_messages")
+      .select("*")
+      .order("created_at", { ascending: false });
+    const msgs = (data as ContactMessage[]) || [];
+    setMessages(msgs);
+    setUnreadCount(msgs.filter((m) => !m.is_read).length);
+  };
+
+  const toggleMessageRead = async (id: string, currentRead: boolean) => {
+    const { error } = await supabase
+      .from("contact_messages")
+      .update({ is_read: !currentRead })
+      .eq("id", id);
+    if (error) toast.error("Failed to update");
+    else fetchMessages();
+  };
+
+  const deleteMessage = async (id: string) => {
+    const { error } = await supabase.from("contact_messages").delete().eq("id", id);
+    if (error) toast.error("Failed to delete");
+    else { toast.success("Message deleted"); fetchMessages(); }
+  };
+
   const fetchOrderItems = async (orderId: string) => {
     if (orderItems[orderId]) return;
     const { data } = await supabase
@@ -165,7 +204,10 @@ const Admin = () => {
   };
 
   useEffect(() => {
-    if (isAdmin) fetchData();
+    if (isAdmin) {
+      fetchData();
+      fetchMessages();
+    }
   }, [isAdmin]);
 
   useEffect(() => {
@@ -174,6 +216,9 @@ const Admin = () => {
       .channel("admin-orders")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
         fetchData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "contact_messages" }, () => {
+        fetchMessages();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -232,51 +277,11 @@ const Admin = () => {
     fetchData();
   };
 
-  const handleAddAdmin = async () => {
-    if (!adminEmail.trim()) { toast.error("Please enter an email"); return; }
-    setAddingAdmin(true);
-
-    // Look up user by email in profiles
-    const { data: profiles, error: profileErr } = await supabase
-      .from("profiles")
-      .select("user_id, full_name")
-      .limit(1000);
-
-    if (profileErr) {
-      toast.error("Failed to search users");
-      setAddingAdmin(false);
-      return;
-    }
-
-    // We need to find user by email - use auth admin or check via a different approach
-    // Since we can't query auth.users directly, we'll use the edge function approach
-    // For now, let's use supabase rpc or direct lookup
-    const { data: userData, error: userError } = await supabase.rpc("has_role", { _user_id: "00000000-0000-0000-0000-000000000000", _role: "admin" });
-
-    // Try to find user by inserting with email lookup via auth
-    // Actually, we need to look up by email. Let's query via an edge function or use profiles.
-    // Simplified: ask admin to provide user ID or use email from auth metadata
-    
-    // Let's try a simpler approach - use supabase auth admin api via edge function
-    toast.error("To add an admin, please provide the user's UUID. Contact support for email-based lookup.");
-    setAddingAdmin(false);
-  };
-
-  const handleAddAdminByUuid = async (userId: string) => {
-    const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" });
-    if (error) {
-      if (error.code === "23505") toast.error("User is already an admin");
-      else toast.error("Failed to add admin: " + error.message);
-    } else {
-      toast.success("Admin added successfully!");
-      setAdminEmail("");
-    }
-  };
-
   const tabs = [
     { key: "dashboard" as Tab, label: "Dashboard", icon: BarChart3 },
     { key: "orders" as Tab, label: "Orders", icon: Package, badge: stats.pendingOrders },
     { key: "menu" as Tab, label: "Menu", icon: UtensilsCrossed },
+    { key: "messages" as Tab, label: "Messages", icon: MessageSquare, badge: unreadCount },
     { key: "admins" as Tab, label: "Admin Users", icon: Shield },
   ];
 
@@ -306,7 +311,7 @@ const Admin = () => {
           </h1>
           <p className="text-sm text-muted-foreground font-body mt-1">Manage your restaurant</p>
         </div>
-        <button onClick={fetchData} disabled={loading} className="p-3 rounded-xl glass text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+        <button onClick={() => { fetchData(); fetchMessages(); }} disabled={loading} className="p-3 rounded-xl glass text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
           <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
@@ -653,11 +658,185 @@ const Admin = () => {
             </div>
           )}
 
+          {/* ============ MESSAGES ============ */}
+          {tab === "messages" && (
+            <MessagesTab messages={messages} onToggleRead={toggleMessageRead} onDelete={deleteMessage} />
+          )}
+
           {/* ============ ADMIN USERS ============ */}
           {tab === "admins" && (
             <AdminUsersTab />
           )}
         </>
+      )}
+    </div>
+  );
+};
+
+// ============ MESSAGES TAB ============
+const MessagesTab = ({
+  messages,
+  onToggleRead,
+  onDelete,
+}: {
+  messages: ContactMessage[];
+  onToggleRead: (id: string, currentRead: boolean) => void;
+  onDelete: (id: string) => void;
+}) => {
+  const [expandedMessage, setExpandedMessage] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
+
+  const filtered = useMemo(() => {
+    if (filter === "unread") return messages.filter((m) => !m.is_read);
+    if (filter === "read") return messages.filter((m) => m.is_read);
+    return messages;
+  }, [messages, filter]);
+
+  const unreadCount = messages.filter((m) => !m.is_read).length;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {[
+          { label: "Total Messages", value: messages.length, color: "text-blue-400", icon: MessageSquare },
+          { label: "Unread", value: unreadCount, color: "text-orange-400", icon: Mail },
+          { label: "Read", value: messages.length - unreadCount, color: "text-green-400", icon: Eye },
+        ].map((stat) => (
+          <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-5">
+            <div className="flex items-center gap-3 mb-2">
+              <div className={`w-10 h-10 rounded-xl bg-secondary flex items-center justify-center ${stat.color}`}>
+                <stat.icon className="w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-2xl font-display font-bold text-foreground">{stat.value}</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">{stat.label}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Filter */}
+      <div className="flex gap-2">
+        {(["all", "unread", "read"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-4 py-2 rounded-xl text-xs font-bold font-body capitalize transition-all ${
+              filter === f
+                ? "bg-gradient-fire text-primary-foreground shadow-fire"
+                : "glass text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {f === "all" ? `All (${messages.length})` : f === "unread" ? `Unread (${unreadCount})` : `Read (${messages.length - unreadCount})`}
+          </button>
+        ))}
+      </div>
+
+      {/* Messages List */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <MessageSquare className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-muted-foreground font-body">No messages found</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((msg) => (
+            <motion.div
+              key={msg.id}
+              layout
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`glass-card rounded-2xl overflow-hidden transition-all ${!msg.is_read ? "border-l-4 border-l-primary" : ""}`}
+            >
+              <button
+                onClick={() => {
+                  setExpandedMessage(expandedMessage === msg.id ? null : msg.id);
+                  if (!msg.is_read) onToggleRead(msg.id, false);
+                }}
+                className="w-full p-4 md:p-5 flex flex-col sm:flex-row sm:items-center gap-3 text-left hover:bg-secondary/30 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-body font-bold text-foreground text-sm truncate">{msg.name}</p>
+                    {!msg.is_read && (
+                      <span className="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-bold font-body">NEW</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground font-body truncate">{msg.email}{msg.phone ? ` • ${msg.phone}` : ""}</p>
+                  <p className="text-sm text-foreground/70 font-body mt-1 line-clamp-1">{msg.message}</p>
+                </div>
+                <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                  <span className="text-xs text-muted-foreground font-body whitespace-nowrap">
+                    {new Date(msg.created_at).toLocaleDateString()} {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  {expandedMessage === msg.id ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {expandedMessage === msg.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-5 pb-5 border-t border-border pt-4 space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="p-3 rounded-xl bg-secondary/50">
+                          <p className="text-xs font-bold text-muted-foreground font-body uppercase tracking-wider mb-1">From</p>
+                          <p className="text-sm text-foreground font-body font-medium">{msg.name}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-secondary/50">
+                          <p className="text-xs font-bold text-muted-foreground font-body uppercase tracking-wider mb-1">Email</p>
+                          <a href={`mailto:${msg.email}`} className="text-sm text-primary font-body hover:underline">{msg.email}</a>
+                        </div>
+                        {msg.phone && (
+                          <div className="p-3 rounded-xl bg-secondary/50">
+                            <p className="text-xs font-bold text-muted-foreground font-body uppercase tracking-wider mb-1">Phone</p>
+                            <a href={`tel:${msg.phone}`} className="text-sm text-primary font-body hover:underline">{msg.phone}</a>
+                          </div>
+                        )}
+                        <div className="p-3 rounded-xl bg-secondary/50">
+                          <p className="text-xs font-bold text-muted-foreground font-body uppercase tracking-wider mb-1">Received</p>
+                          <p className="text-sm text-foreground font-body">{new Date(msg.created_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-secondary/50">
+                        <p className="text-xs font-bold text-muted-foreground font-body uppercase tracking-wider mb-2">Message</p>
+                        <p className="text-sm text-foreground font-body whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => onToggleRead(msg.id, msg.is_read)}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl glass text-sm font-body font-bold text-muted-foreground hover:text-foreground transition-all"
+                        >
+                          {msg.is_read ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          Mark as {msg.is_read ? "Unread" : "Read"}
+                        </button>
+                        <a
+                          href={`mailto:${msg.email}?subject=Re: Your message to Jushh&body=Hi ${msg.name},%0D%0A%0D%0AThank you for reaching out!%0D%0A%0D%0A`}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-fire text-primary-foreground text-sm font-body font-bold hover:shadow-fire transition-all"
+                        >
+                          <Mail className="w-3.5 h-3.5" /> Reply via Email
+                        </a>
+                        <button
+                          onClick={() => onDelete(msg.id)}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-body font-bold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -697,12 +876,6 @@ const AdminUsersTab = () => {
     if (!adminEmail.trim()) { toast.error("Please enter a valid email"); return; }
     setAddingAdmin(true);
 
-    // We need an edge function to look up user by email
-    // For now, let's use a workaround: the admin can enter the user_id directly
-    // or we create an edge function
-
-    // Try to find by checking profiles - but profiles don't have email
-    // We'll create an edge function for this
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;

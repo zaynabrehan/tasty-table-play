@@ -121,11 +121,6 @@ const Navbar = () => {
             {/* Auth */}
             {user ? (
               <div className="flex items-center gap-2">
-                {isAdmin && (
-                  <Link to="/admin" className="p-2 text-primary hover:text-accent transition-colors" title="Admin">
-                    <Shield className="w-5 h-5" />
-                  </Link>
-                )}
                 <button onClick={() => setShowLogoutDialog(true)} className="p-2 text-muted-foreground hover:text-destructive transition-colors" title="Sign out">
                   <LogOut className="w-5 h-5" />
                 </button>
