@@ -2,7 +2,7 @@ import jushhLogo from "@/assets/jushh-logo.png";
 import { useAuth } from "@/hooks/useAuth";
 import { useStore } from "@/context/StoreContext";
 import { AnimatePresence, motion } from "framer-motion";
-import { Clock, Heart, LogOut, MapPin, Menu, Phone, Shield, ShoppingCart, User, X } from "lucide-react";
+import { Clock, Heart, LogOut, MapPin, Menu, Phone, ShoppingCart, User, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
