@@ -886,6 +886,7 @@ const AdminUsersTab = () => {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
         body: JSON.stringify({ email: adminEmail.trim() }),
       });
@@ -914,6 +915,7 @@ const AdminUsersTab = () => {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
         body: JSON.stringify({ user_id: userId, action: "remove" }),
       });
