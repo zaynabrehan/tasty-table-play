@@ -880,7 +880,14 @@ const AdminUsersTab = () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
 
+    if (!token) {
+      toast.error("Please sign in again and try once more");
+      setAddingAdmin(false);
+      return;
+    }
+
     try {
+      const email = adminEmail.trim().toLowerCase();
       const res = await fetch(`${supabaseUrl}/functions/v1/add-admin`, {
         method: "POST",
         headers: {
@@ -888,13 +895,16 @@ const AdminUsersTab = () => {
           "Authorization": `Bearer ${token}`,
           "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
-        body: JSON.stringify({ email: adminEmail.trim() }),
+        body: JSON.stringify({
+          email,
+          redirectTo: `${window.location.origin}/signin`,
+        }),
       });
       const result = await res.json();
       if (!res.ok) {
         toast.error(result.error || "Failed to add admin");
       } else {
-        toast.success(`${adminEmail} has been granted admin access!`);
+        toast.success(result.message || `${email} has been granted admin access!`);
         setAdminEmail("");
         fetchAdmins();
       }
@@ -938,7 +948,7 @@ const AdminUsersTab = () => {
           <UserPlus className="w-4 h-4 text-primary" /> Add New Admin
         </h2>
         <p className="text-sm text-muted-foreground font-body mb-4">
-          Enter the email address of a registered user to grant them admin access.
+          Enter any email address to grant admin access. Existing users are updated instantly, and new users will receive an invite.
         </p>
         <div className="flex gap-3">
           <input

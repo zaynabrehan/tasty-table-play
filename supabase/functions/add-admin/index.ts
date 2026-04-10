@@ -2,16 +2,59 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+const jsonResponse = (body: Record<string, unknown>, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
+const getBearerToken = (authHeader: string | null) => {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  return authHeader.slice(7);
+};
+
+const isValidEmail = (email: string) => /\S+@\S+\.\S+/.test(email);
+
+const findUserByEmail = async (
+  adminClient: ReturnType<typeof createClient>,
+  email: string,
+) => {
+  const normalizedEmail = email.toLowerCase();
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await adminClient.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const users = data.users ?? [];
+    const matchedUser = users.find(
+      (user) => user.email?.toLowerCase() === normalizedEmail,
+    );
+
+    if (matchedUser) {
+      return matchedUser;
+    }
+
+    if (users.length < 200) {
+      break;
+    }
+  }
+
+  return null;
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
-
-  const headers = { ...corsHeaders, "Content-Type": "application/json" };
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -24,126 +67,110 @@ Deno.serve(async (req) => {
         serviceRole: !!serviceRoleKey,
         anon: !!anonKey,
       });
-      return new Response(
-        JSON.stringify({ error: "Server configuration error" }),
-        { status: 500, headers }
-      );
+      return jsonResponse({ error: "Server configuration error" }, 500);
     }
 
-    // Verify the caller is authenticated
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers,
-      });
+    const token = getBearerToken(req.headers.get("Authorization"));
+    if (!token) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     const anonClient = createClient(supabaseUrl, anonKey);
     const {
       data: { user: caller },
       error: authError,
-    } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
+    } = await anonClient.auth.getUser(token);
 
     if (authError || !caller) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers,
-      });
+      console.error("Caller auth failed:", authError);
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
-    // Check caller is admin using service role client
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-    const { data: isAdmin } = await adminClient.rpc("has_role", {
+    const { data: isAdmin, error: roleError } = await adminClient.rpc("has_role", {
       _user_id: caller.id,
       _role: "admin",
     });
 
+    if (roleError) {
+      console.error("Admin role check failed:", roleError);
+      return jsonResponse({ error: "Failed to verify admin access" }, 500);
+    }
+
     if (!isAdmin) {
-      return new Response(
-        JSON.stringify({ error: "Only admins can manage admin users" }),
-        { status: 403, headers }
-      );
+      return jsonResponse({ error: "Only admins can manage admin users" }, 403);
     }
 
     const body = await req.json();
-    const { email, user_id, action } = body;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const userId = typeof body.user_id === "string" ? body.user_id : "";
+    const action = body.action;
+    const redirectTo = typeof body.redirectTo === "string" ? body.redirectTo : undefined;
 
-    // Remove admin
-    if (action === "remove" && user_id) {
+    if (action === "remove" && userId) {
       const { error } = await adminClient
         .from("user_roles")
         .delete()
-        .eq("user_id", user_id)
+        .eq("user_id", userId)
         .eq("role", "admin");
+
       if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 400,
-          headers,
-        });
+        console.error("Remove admin failed:", error);
+        return jsonResponse({ error: error.message }, 400);
       }
-      return new Response(JSON.stringify({ success: true }), { headers });
+
+      return jsonResponse({ success: true });
     }
 
-    // Add admin by email
-    if (!email) {
-      return new Response(JSON.stringify({ error: "Email is required" }), {
-        status: 400,
-        headers,
-      });
+    if (!email || !isValidEmail(email)) {
+      return jsonResponse({ error: "A valid email is required" }, 400);
     }
 
-    // Look up user by email using admin API
-    const {
-      data: { users },
-      error: listError,
-    } = await adminClient.auth.admin.listUsers();
+    let targetUser = await findUserByEmail(adminClient, email);
+    let invited = false;
 
-    if (listError) {
-      console.error("listUsers error:", listError);
-      return new Response(
-        JSON.stringify({ error: "Failed to look up users" }),
-        { status: 500, headers }
-      );
-    }
-
-    const targetUser = users.find(
-      (u: any) => u.email?.toLowerCase() === email.toLowerCase()
-    );
     if (!targetUser) {
-      return new Response(
-        JSON.stringify({ error: "No registered user found with that email" }),
-        { status: 404, headers }
+      const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
+        email,
+        redirectTo ? { redirectTo } : undefined,
       );
+
+      if (inviteError) {
+        console.error("Invite admin failed:", inviteError);
+        return jsonResponse({ error: inviteError.message }, 400);
+      }
+
+      targetUser = inviteData.user;
+      invited = true;
     }
 
-    // Insert admin role
+    if (!targetUser) {
+      return jsonResponse({ error: "Could not create or find a user for this email" }, 500);
+    }
+
     const { error: insertError } = await adminClient
       .from("user_roles")
       .insert({ user_id: targetUser.id, role: "admin" });
 
     if (insertError) {
       if (insertError.code === "23505") {
-        return new Response(
-          JSON.stringify({ error: "User is already an admin" }),
-          { status: 400, headers }
-        );
+        return jsonResponse({ error: "User is already an admin" }, 400);
       }
-      return new Response(JSON.stringify({ error: insertError.message }), {
-        status: 400,
-        headers,
-      });
+
+      console.error("Insert admin role failed:", insertError);
+      return jsonResponse({ error: insertError.message }, 400);
     }
 
-    return new Response(
-      JSON.stringify({ success: true, user_id: targetUser.id }),
-      { headers }
-    );
+    return jsonResponse({
+      success: true,
+      user_id: targetUser.id,
+      invited,
+      message: invited
+        ? "Admin invite sent. They will get admin access after completing signup."
+        : "Admin access granted.",
+    });
   } catch (err) {
     console.error("Edge function error:", err);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers,
-    });
+    return jsonResponse({ error: "Internal server error" }, 500);
   }
 });
