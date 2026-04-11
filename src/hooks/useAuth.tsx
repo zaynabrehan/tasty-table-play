@@ -25,23 +25,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsAdmin(!!data);
   };
 
+  const checkAndGrantPendingAdmin = async (userId: string, email: string) => {
+    try {
+      const { data: granted } = await supabase.rpc("check_and_grant_pending_admin", {
+        _user_id: userId,
+        _email: email,
+      });
+      if (granted) {
+        setIsAdmin(true);
+        return;
+      }
+    } catch (e) {
+      console.error("Error checking pending admin:", e);
+    }
+    await checkAdmin(userId);
+  };
+
   useEffect(() => {
-    // 1. Restore session from storage FIRST
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        checkAdmin(session.user.id);
+        checkAndGrantPendingAdmin(session.user.id, session.user.email || "");
       }
       setLoading(false);
     });
 
-    // 2. Then listen for subsequent auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        setTimeout(() => checkAdmin(session.user.id), 0);
+        setTimeout(() => checkAndGrantPendingAdmin(session.user.id, session.user.email || ""), 0);
       } else {
         setIsAdmin(false);
       }

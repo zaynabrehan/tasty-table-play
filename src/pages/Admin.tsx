@@ -847,24 +847,29 @@ const AdminUsersTab = () => {
   const [adminEmail, setAdminEmail] = useState("");
   const [addingAdmin, setAddingAdmin] = useState(false);
   const [adminUsers, setAdminUsers] = useState<{ user_id: string; role: string; full_name: string | null }[]>([]);
+  const [pendingEmails, setPendingEmails] = useState<{ id: string; email: string; created_at: string }[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(true);
 
   const inputClass = "w-full bg-secondary border border-border rounded-xl px-4 py-3 text-foreground font-body placeholder:text-muted-foreground outline-none focus:border-primary focus:shadow-fire transition-all";
 
   const fetchAdmins = async () => {
     setLoadingAdmins(true);
-    const { data: roles } = await supabase.from("user_roles").select("user_id, role");
-    if (roles) {
+    const [rolesRes, pendingRes] = await Promise.all([
+      supabase.from("user_roles").select("user_id, role"),
+      supabase.from("pending_admin_emails").select("*").order("created_at", { ascending: false }),
+    ]);
+    if (rolesRes.data) {
       const { data: profiles } = await supabase.from("profiles").select("user_id, full_name");
       const profileMap = new Map((profiles || []).map((p) => [p.user_id, p.full_name]));
       setAdminUsers(
-        roles.map((r) => ({
+        rolesRes.data.map((r) => ({
           user_id: r.user_id,
           role: r.role,
           full_name: profileMap.get(r.user_id) || null,
         }))
       );
     }
+    setPendingEmails((pendingRes.data as any[]) || []);
     setLoadingAdmins(false);
   };
 
@@ -873,45 +878,33 @@ const AdminUsersTab = () => {
   }, []);
 
   const handleAddAdminByEmail = async () => {
-    if (!adminEmail.trim()) { toast.error("Please enter a valid email"); return; }
-    setAddingAdmin(true);
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-
-    if (!token) {
-      toast.error("Please sign in again and try once more");
-      setAddingAdmin(false);
+    const email = adminEmail.trim().toLowerCase();
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      toast.error("Please enter a valid email");
       return;
     }
+    setAddingAdmin(true);
 
-    try {
-      const email = adminEmail.trim().toLowerCase();
-      const res = await fetch(`${supabaseUrl}/functions/v1/add-admin`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
-          email,
-          redirectTo: `${window.location.origin}/signin`,
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        toast.error(result.error || "Failed to add admin");
+    const { error } = await supabase.from("pending_admin_emails").insert({ email });
+
+    if (error) {
+      if (error.code === "23505") {
+        toast.error("This email is already in the pending list");
       } else {
-        toast.success(result.message || `${email} has been granted admin access!`);
-        setAdminEmail("");
-        fetchAdmins();
+        toast.error(error.message || "Failed to add email");
       }
-    } catch {
-      toast.error("Failed to connect to server");
+    } else {
+      toast.success(`${email} added! They will get admin access when they sign in.`);
+      setAdminEmail("");
+      fetchAdmins();
     }
     setAddingAdmin(false);
+  };
+
+  const handleRemovePending = async (id: string) => {
+    const { error } = await supabase.from("pending_admin_emails").delete().eq("id", id);
+    if (error) toast.error("Failed to remove");
+    else { toast.success("Removed from pending list"); fetchAdmins(); }
   };
 
   const handleRemoveAdmin = async (userId: string) => {
@@ -948,7 +941,7 @@ const AdminUsersTab = () => {
           <UserPlus className="w-4 h-4 text-primary" /> Add New Admin
         </h2>
         <p className="text-sm text-muted-foreground font-body mb-4">
-          Enter any email address to grant admin access. Existing users are updated instantly, and new users will receive an invite.
+          Enter an email address. When a user signs in with this email, they will automatically get admin access.
         </p>
         <div className="flex gap-3">
           <input
@@ -968,6 +961,31 @@ const AdminUsersTab = () => {
           </button>
         </div>
       </div>
+
+      {pendingEmails.length > 0 && (
+        <div className="glass-card rounded-2xl p-6">
+          <h2 className="font-bold text-foreground font-body mb-4 flex items-center gap-2">
+            <Mail className="w-4 h-4 text-yellow-400" /> Pending Admin Emails
+          </h2>
+          <p className="text-xs text-muted-foreground font-body mb-3">These users will get admin access when they sign in.</p>
+          <div className="space-y-3">
+            {pendingEmails.map((pe) => (
+              <div key={pe.id} className="flex items-center justify-between p-3 rounded-xl bg-secondary/50">
+                <div>
+                  <p className="font-body font-bold text-foreground text-sm">{pe.email}</p>
+                  <p className="text-xs text-muted-foreground font-body">Added {new Date(pe.created_at).toLocaleDateString()}</p>
+                </div>
+                <button
+                  onClick={() => handleRemovePending(pe.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold font-body text-destructive border border-destructive/30 hover:bg-destructive/10 transition-all"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="glass-card rounded-2xl p-6">
         <h2 className="font-bold text-foreground font-body mb-4 flex items-center gap-2">
